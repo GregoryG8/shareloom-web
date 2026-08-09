@@ -49,13 +49,12 @@
 
       @if (!cryptoSupported()) {
         <div id="cryptoWarning" class="warning-banner" role="alert">
-          <span aria-hidden="true">⚠️</span>
           Tu navegador no soporta cifrado. Utiliza un navegador moderno.
         </div>
       }
     }
 
-    <!-- Processing States -->
+    <!-- Upload Processing States -->
     @if (isProcessing()) {
       <div class="progress-area" aria-live="polite" aria-atomic="true">
         <div class="file-info">
@@ -78,8 +77,7 @@
             <div class="progress-bar-fill indeterminate"></div>
           </div>
 
-          <!-- Step indicators -->
-          <ol class="step-list" aria-label="Pasos del proceso">
+          <ol class="step-list" aria-label="Pasos del proceso de subida">
             <li [class.active]="state() === 'encrypting'" [class.done]="state() === 'requesting-upload-url' || state() === 'uploading'">
               <span class="step-indicator" aria-hidden="true"></span>
               Cifrado local
@@ -97,7 +95,35 @@
       </div>
     }
 
-    <!-- Success State -->
+    <!-- Download Processing States -->
+    @if (isDownloading()) {
+      <div class="progress-area" aria-live="polite" aria-atomic="true">
+        <div class="status-section">
+          <p class="status-message" role="status">{{ stateMessages[state()] }}</p>
+
+          <div class="progress-bar-track" role="progressbar" aria-label="Progreso de descarga" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar-fill indeterminate"></div>
+          </div>
+
+          <ol class="step-list" aria-label="Pasos del proceso de descarga">
+            <li [class.active]="state() === 'downloading'" [class.done]="state() === 'deleting' || state() === 'decrypting'">
+              <span class="step-indicator" aria-hidden="true"></span>
+              Descargando archivo cifrado
+            </li>
+            <li [class.active]="state() === 'deleting'" [class.done]="state() === 'decrypting'">
+              <span class="step-indicator" aria-hidden="true"></span>
+              Eliminando del servidor
+            </li>
+            <li [class.active]="state() === 'decrypting'">
+              <span class="step-indicator" aria-hidden="true"></span>
+              Descifrando localmente
+            </li>
+          </ol>
+        </div>
+      </div>
+    }
+
+    <!-- Upload Success State -->
     @if (state() === 'success') {
       <div class="success-area" aria-live="polite">
         <div class="success-badge" aria-hidden="true">
@@ -110,7 +136,7 @@
         <h2 class="success-title">Archivo protegido correctamente</h2>
         <p class="success-description">
           Tu archivo fue cifrado en este dispositivo y subido de forma segura.
-          La clave de descifrado está incluida únicamente en el enlace de abajo y nunca fue enviada a ningún servidor.
+          La clave de descifrado está incluida únicamente en el enlace de abajo.
         </p>
 
         <div class="share-link-box">
@@ -153,6 +179,81 @@
 
         <button type="button" class="btn-secondary" (click)="reset()">
           Subir otro archivo
+        </button>
+      </div>
+    }
+
+    <!-- Download Ready State: Dynamic File Viewer -->
+    @if (state() === 'download-ready' && decryptedFile()) {
+      <div class="download-ready-area" aria-live="polite">
+        <div class="success-badge" aria-hidden="true">
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <polyline points="9 12 12 15 15 9"/>
+          </svg>
+        </div>
+
+        <h2 class="success-title">Archivo descifrado correctamente</h2>
+        <p class="success-description">
+          El archivo fue descargado, eliminado del servidor y descifrado localmente en tu dispositivo.
+        </p>
+
+        <!-- Dynamic preview based on mimeType -->
+        <div class="preview-container">
+          @if (isImage()) {
+            <img
+              [src]="safeBlobUrl()"
+              [alt]="'Vista previa: ' + fileName()"
+              class="preview-image"
+            />
+          }
+          @if (isPdf()) {
+            <iframe
+              [src]="safeBlobUrl()"
+              [title]="'Vista previa PDF: ' + fileName()"
+              class="preview-pdf"
+            ></iframe>
+          }
+          @if (isAudio()) {
+            <audio
+              controls
+              [src]="safeBlobUrl()"
+              class="preview-audio"
+              [attr.aria-label]="'Reproducir: ' + fileName()"
+            ></audio>
+          }
+        </div>
+
+        <div class="download-info">
+          <span class="file-name-label">{{ fileName() }}</span>
+          <span class="file-size-label">{{ formatBytes(fileSize()) }}</span>
+        </div>
+
+        <!-- Download button (always visible) -->
+        <a
+          [href]="decryptedFile()!.objectUrl"
+          [download]="decryptedFile()!.fileName"
+          class="btn-primary download-link"
+          aria-label="Descargar archivo descifrado a tu dispositivo"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Descargar Archivo
+        </a>
+
+        <div class="security-note" aria-label="Nota de seguridad">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+          <span>El archivo ha sido eliminado del servidor. Este enlace ya no funcionará.</span>
+        </div>
+
+        <button type="button" class="btn-secondary" (click)="reset()">
+          Subir un archivo
         </button>
       </div>
     }

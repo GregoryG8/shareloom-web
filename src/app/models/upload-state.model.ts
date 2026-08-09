@@ -1,13 +1,18 @@
 /**
- * Represents every possible state in the file upload flow.
+ * Represents every possible state in the application.
+ * Covers both upload and download flows.
  */
-export type UploadState =
+export type AppState =
   | 'idle'
   | 'file-selected'
   | 'encrypting'
   | 'requesting-upload-url'
   | 'uploading'
   | 'success'
+  | 'downloading'
+  | 'deleting'
+  | 'decrypting'
+  | 'download-ready'
   | 'error';
 
 /**
@@ -16,6 +21,13 @@ export type UploadState =
 export interface UploadResponse {
   uploadUrl: string;
   fileId: string;
+}
+
+/**
+ * Response shape returned by GET /download/:fileId (API Gateway → Lambda).
+ */
+export interface DownloadResponse {
+  downloadUrl: string;
 }
 
 /**
@@ -28,14 +40,29 @@ export interface FileMetadata {
 }
 
 /**
- * Maps each upload state to a user-facing status message.
+ * Represents the decrypted file ready for user interaction.
  */
-export const STATE_MESSAGES: Record<UploadState, string> = {
+export interface DecryptedFile {
+  blob: Blob;
+  objectUrl: string;
+  safeUrl: unknown; // SafeResourceUrl from DomSanitizer
+  mimeType: string;
+  fileName: string;
+}
+
+/**
+ * Maps each app state to a user-facing status message.
+ */
+export const STATE_MESSAGES: Record<AppState, string> = {
   idle: 'Selecciona un archivo para cifrar y compartir',
   'file-selected': 'Preparando archivo...',
   encrypting: 'Cifrando archivo localmente (AES-256-GCM)...',
   'requesting-upload-url': 'Preparando subida segura...',
   uploading: 'Subiendo archivo cifrado...',
   success: 'Archivo protegido correctamente',
+  downloading: 'Descargando archivo cifrado...',
+  deleting: 'Eliminando archivo del servidor...',
+  decrypting: 'Descifrando archivo localmente...',
+  'download-ready': 'Archivo descifrado correctamente',
   error: 'Ha ocurrido un error',
 };

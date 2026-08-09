@@ -6,10 +6,11 @@ import { Injectable } from '@angular/core';
  * Uses exclusively the Web Crypto API (window.crypto.subtle).
  * No external cryptography libraries.
  *
- * Encrypted payload format:
- * ┌────────────┬───────────────────────────────┐
- * │ IV 12 bytes│ AES-GCM ciphertext + auth tag │
- * └────────────┴───────────────────────────────┘
+ * Upload: encrypts file → returns ciphertext (without IV prepended).
+ * Download: imports key from Base64URL, decrypts ciphertext using provided IV.
+ *
+ * URL fragment format: #fileId:key:iv
+ * The IV travels in the URL fragment (never sent to server via HTTP).
  */
 @Injectable({
   providedIn: 'root',
@@ -46,28 +47,94 @@ export class CryptoService {
   }
 
   /**
-   * Encrypts a file buffer using AES-GCM with a random IV.
-   * Returns the combined payload as ArrayBuffer: [ IV (12 bytes) | ciphertext + auth tag ].
-   *
-   * The IV is never reused — it is freshly generated per invocation.
+   * Generates a cryptographically secure random IV (12 bytes).
    */
-  async encryptFile(fileBuffer: ArrayBuffer, key: CryptoKey): Promise<ArrayBuffer> {
-    // Cryptographically secure random IV
-    const iv = window.crypto.getRandomValues(new Uint8Array(this.IV_LENGTH));
+  generateIv(): Uint8Array<ArrayBuffer> {
+    return window.crypto.getRandomValues(new Uint8Array(this.IV_LENGTH)) as Uint8Array<ArrayBuffer>;
+  }
 
+  /**
+   * Encrypts a file buffer using AES-GCM with the provided IV.
+   * Returns ONLY the ciphertext + auth tag (IV is NOT prepended).
+   * The IV must be stored separately (in the URL fragment).
+   */
+  async encryptFile(fileBuffer: ArrayBuffer, key: CryptoKey, iv: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer> {
     const ciphertext = await window.crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
       key,
       fileBuffer,
     );
 
-    // Combine: [IV][ciphertext + auth tag] into a single ArrayBuffer
-    const ciphertextBytes = new Uint8Array(ciphertext);
-    const combined = new Uint8Array(iv.byteLength + ciphertextBytes.byteLength);
-    combined.set(iv, 0);
-    combined.set(ciphertextBytes, iv.byteLength);
+    return ciphertext;
+  }
 
-    return combined.buffer as ArrayBuffer;
+  /**
+   * Decrypts an AES-GCM encrypted buffer using the provided key and IV.
+   *
+   * @param encryptedData - The ciphertext + auth tag (no IV prefix)
+   * @param key - The AES-GCM CryptoKey
+   * @param iv - The 12-byte IV used during encryption
+   * @returns The decrypted plaintext as ArrayBuffer
+   */
+  async decryptFile(encryptedData: ArrayBuffer, key: CryptoKey, iv: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer> {
+    if (!this.isSupported()) {
+      throw new Error('Web Crypto API no está disponible en este navegador.');
+    }
+
+    try {
+      return await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        encryptedData,
+      );
+    } catch {
+      throw new Error(
+        'No se pudo descifrar el archivo. La clave o el IV pueden ser incorrectos, o el archivo fue modificado.',
+      );
+    }
+  }
+
+  /**
+   * Imports a CryptoKey from a Base64URL-encoded string.
+   * Used when reading the key from the URL fragment during download.
+   */
+  async importKeyFromBase64Url(base64UrlKey: string): Promise<CryptoKey> {
+    if (!this.isSupported()) {
+      throw new Error('Web Crypto API no está disponible en este navegador.');
+    }
+
+    const rawBytes = this.base64UrlToUint8Array(base64UrlKey);
+
+    if (rawBytes.byteLength !== 32) {
+      throw new Error('La clave proporcionada no es válida (debe ser de 256 bits).');
+    }
+
+    return window.crypto.subtle.importKey(
+      'raw',
+      rawBytes.buffer as ArrayBuffer,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt'],
+    );
+  }
+
+  /**
+   * Converts a Base64URL string back to a Uint8Array.
+   * Used to restore IV and key from the URL fragment.
+   */
+  base64UrlToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
+    // Restore standard Base64: - → +, _ → /, re-add padding
+    let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padding = base64.length % 4;
+    if (padding === 2) base64 += '==';
+    else if (padding === 3) base64 += '=';
+
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes as Uint8Array<ArrayBuffer>;
   }
 
   /**
@@ -79,14 +146,14 @@ export class CryptoService {
   async exportKeyToBase64Url(key: CryptoKey): Promise<string> {
     const rawBuffer = await window.crypto.subtle.exportKey('raw', key);
     const bytes = new Uint8Array(rawBuffer);
-    return this.arrayBufferToBase64Url(bytes);
+    return this.uint8ArrayToBase64Url(bytes);
   }
 
   /**
    * Converts a Uint8Array to a Base64URL string (RFC 4648 §5).
    * Replaces + → -, / → _, strips trailing =.
    */
-  private arrayBufferToBase64Url(bytes: Uint8Array): string {
+  uint8ArrayToBase64Url(bytes: Uint8Array): string {
     let binary = '';
     for (let i = 0; i < bytes.byteLength; i++) {
       binary += String.fromCharCode(bytes[i]);
